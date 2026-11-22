@@ -10,29 +10,50 @@ This module bypasses their checks by spoofing all device-specific properties to 
 This module won't magically let you run all Samsung apps on your phone (for example Samsung Camera). ONLY ones that can normally be installed on
 non-Samsung phones too should and will most likely work without issues.
 
-## How to install
-### Prerequisites
-- Any Samsung phone running an AOSP ROM
-- A ROM that won't let you use your preferred Samsung app by default (such as LineageOS)
-- Gapps (Google apps) *should* be installed
+## Requirements and compatibility
 
-### Installation
-- Install [Magisk](https://github.com/topjohnwu/Magisk/releases) on your phone by flashing the Magisk APK in recovery mode.
-- Once installed, go into Magisk's Settings and enable "Zygisk" and reboot afterwards.
-    - IMPORTANT: DO NOT add your preferred Samsung app to Magisk's denyList as that will break the module.
-- After rebooting, open Magisk and install the [LSPosed Module](https://github.com/LSPosed/LSPosed/releases).
-    - Make sure to download the Zygisk version of the module.
-    - Reboot after the installation finishes.
-- After rebooting, if everything went right you should now see a new notification in the notification panel saying "LSPosed loaded".
-    - Tap that notification to open the Manager.
-    - You should now see "Activated" at the top of the Manager if everything worked fine.
-- Now download the latest APK of WearableSpoof from the [releases section](https://github.com/Simon1511/WearableSpoof/releases) and install it like any normal APK.
-- Open the Play Store and download all your preferred Samsung apps.
-- Now open the LSPosed Manager again and go to "Modules".
-- WearableSpoof should now appear in that list.
-- Click on WearableSpoof and enable the module by flipping the switch at the top that says "Enable module".
-- Next, tick all the Samsung apps that you just installed (for example, "Galaxy Wearable" and "Galaxy Watch 4 Manager") and reboot your phone afterwards.
-- Once rebooted, you should be able to successfully open your apps.
+- Android 10 (API 29) or newer on a Samsung phone running an AOSP ROM.
+- A rooted device with an active Xposed framework implementing **libxposed API 102 or newer**.
+  This version uses the [modern libxposed API](https://github.com/libxposed/api).
+  Legacy XposedBridge-only frameworks and frameworks supporting only API 100/101 cannot load it.
+- Google Play services may be required by the Samsung apps themselves.
+
+Version 1.3 migrates away from the legacy Xposed entry point. Check your framework's API
+support before upgrading from 1.2. The module keeps the existing Pixel 7 Pro spoof profile;
+it does not change your actual Android version, security patch level, or device certification.
+
+## How to install
+
+1. Install and activate a compatible Xposed framework using its own installation instructions.
+2. Install the WearableSpoof APK from the [releases section](https://github.com/Simon1511/WearableSpoof/releases).
+3. Install Galaxy Wearable, SmartThings, and any watch/band plugins you need.
+4. In your framework's manager, enable WearableSpoof and select the Samsung apps that need it.
+   Galaxy Wearable and SmartThings are included as recommended scope. Add each installed
+   watch/band plugin manually; the scope remains editable.
+5. Restart the selected apps (or reboot). Repeat the scope step whenever a new plugin is installed.
+
+If using Magisk/Zygisk, do not exclude the selected apps from injection with an enforced
+DenyList. Enable the module only for the Samsung apps that need it, not Android system
+processes or Google Play services. Packages outside `com.samsung.*` and `com.sec.*` are ignored.
+
+## Building
+
+Use JDK 17 and an Android SDK containing platform 37 (`platforms;android-37.0`) and
+Build Tools 36.0.0 or newer. Set `ANDROID_HOME` to the SDK location or set `sdk.dir` in
+an untracked `local.properties` file. Gradle is provided by the wrapper.
+
+```sh
+./gradlew assembleDebug assembleRelease lint lintRelease
+```
+
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Release builds
+are unsigned; sign them with your own existing release key before distribution. Updating
+an installed APK requires the same signing key as the previous installation.
+
+Build and lint checks do not verify framework injection or Samsung app behavior. Before
+releasing, test on a supported rooted device: confirm the module is recognized, enable
+Galaxy Wearable and its plugin, restart both, and complete pairing. Check the framework
+logs for `WearableSpoof` warnings and verify an app outside the module's scope is unaffected.
 
 ## FAQ and issues
 ### The wearable app asks me to download the plugin from the Play Store
@@ -42,4 +63,6 @@ After the installation finishes, open the LSPosed Manager and add the app to the
 Go into your phone's Settings -> Apps -> All Apps -> Enable "show system apps" -> Search for "Play Services" -> Permissions -> Allow permissions for "Nearby devices".
 
 ### The plugin app on the Play Store says "Not supported on this device"
-Make sure you are passing Safetynet and that your Play Store shows "Device certified" in Settings.
+Check whether the Play Store shows "Device certified" in Settings. This module only changes
+values inside selected Samsung app processes; it cannot change Play Store compatibility,
+Play Integrity verdicts, or server-side eligibility checks.

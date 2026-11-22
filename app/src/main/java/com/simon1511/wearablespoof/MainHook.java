@@ -20,76 +20,80 @@ package com.simon1511.wearablespoof;
 
 import android.app.admin.DevicePolicyManager;
 import android.os.Build;
+import android.util.Log;
 
-import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
-public class MainHook implements IXposedHookLoadPackage {
+import io.github.libxposed.api.XposedModule;
+
+public final class MainHook extends XposedModule {
+    private static final String TAG = "WearableSpoof";
+    private boolean initialized;
 
     @Override
-    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
-        XposedBridge.log("WearableSpoof: Started for: " + lpparam.packageName);
+    public void onPackageLoaded(PackageLoadedParam param) {
+        // Boot-class hooks and Build fields affect the entire process. Only initialize for
+        // its main Samsung package, never for packages loaded into another app's process.
+        String packageName = param.getPackageName();
+        if (!param.isFirstPackage() || initialized
+                || !(packageName.startsWith("com.samsung.") || packageName.startsWith("com.sec."))) {
+            return;
+        }
+        initialized = true;
+        log(Log.INFO, TAG, "Applying compatibility fixes to " + packageName);
 
-        XposedHelpers.findAndHookMethod("android.app.admin.DevicePolicyManager",
-                lpparam.classLoader, "getStorageEncryptionStatus", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                param.setResult(DevicePolicyManager.ENCRYPTION_STATUS_ACTIVE_PER_USER);
-            }
-        });
+        hookConstantMethod(DevicePolicyManager.class, "getStorageEncryptionStatus",
+                DevicePolicyManager.ENCRYPTION_STATUS_ACTIVE_PER_USER);
+        try {
+            Class<?> storageManager = Class.forName("android.os.storage.StorageManager", false,
+                    param.getDefaultClassLoader());
+            hookConstantMethod(storageManager, "isEncrypted", true);
+        } catch (ClassNotFoundException | RuntimeException e) {
+            log(Log.WARN, TAG, "StorageManager is unavailable; continuing with device spoofing", e);
+        }
 
-        XposedHelpers.findAndHookMethod("android.os.storage.StorageManager",
-                lpparam.classLoader, "isEncrypted", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(true);
-                    }
-                });
+        spoofDevice();
+    }
 
-        if (lpparam.packageName.startsWith("com.samsung") || lpparam.packageName.startsWith("com.sec")) {
-            XposedBridge.log("WearableSpoof: Hooking into: " + lpparam.packageName);
+    private void hookConstantMethod(Class<?> owner, String name, Object result) {
+        try {
+            Method method = owner.getDeclaredMethod(name);
+            hook(method).intercept(chain -> result);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Hidden APIs can differ between Android releases and ROMs. Each hook is optional.
+            log(Log.WARN, TAG, "Cannot hook " + owner.getName() + "." + name, e);
+        }
+    }
 
-            // ro.product.manufacturer
-            if (Build.MANUFACTURER.equals("samsung")) {
-                XposedHelpers.setStaticObjectField(Build.class, "MANUFACTURER", "Google");
-            }
+    private void spoofDevice() {
+        if ("samsung".equalsIgnoreCase(Build.MANUFACTURER)) {
+            setBuildField("MANUFACTURER", "Google");
+        }
+        if ("samsung".equalsIgnoreCase(Build.BRAND)) {
+            setBuildField("BRAND", "google");
+        }
+        setBuildField("DEVICE", "cheetah");
+        setBuildField("PRODUCT", "cheetah");
+        setBuildField("TAGS", "release-keys");
+        setBuildField("TYPE", "user");
+        if (Build.MODEL != null && Build.MODEL.startsWith("SM-")) {
+            setBuildField("MODEL", "Pixel 7 Pro");
+        }
+        if (Build.FINGERPRINT != null && Build.FINGERPRINT.contains("samsung")) {
+            // Keep the known Pixel identity together; this does not change the OS or patch level.
+            setBuildField("FINGERPRINT",
+                    "google/cheetah/cheetah:13/TQ2A.230505.002/9891397:user/release-keys");
+        }
+    }
 
-            // ro.product.brand
-            if (Build.BRAND.equals("samsung")) {
-                XposedHelpers.setStaticObjectField(Build.class, "BRAND", "google");
-            }
-
-            // ro.product.device - always spoof this
-            XposedHelpers.setStaticObjectField(Build.class, "DEVICE", "cheetah");
-
-            // ro.build.tags
-            if (!Build.TAGS.equals("release-keys")) {
-                XposedHelpers.setStaticObjectField(Build.class, "TAGS", "release-keys");
-            }
-
-            // ro.build.type
-            if (!Build.TYPE.equals("user")) {
-                XposedHelpers.setStaticObjectField(Build.class, "TYPE", "user");
-            }
-
-            // ro.product.name - always spoof this
-            XposedHelpers.setStaticObjectField(Build.class, "PRODUCT", "cheetah");
-
-            // ro.product.model
-            if (Build.MODEL.startsWith("SM-")) {
-                XposedHelpers.setStaticObjectField(Build.class, "MODEL", "Pixel 7 Pro");
-            }
-
-            // ro.build.fingerprint
-            if (Build.FINGERPRINT.contains("samsung")) {
-                XposedHelpers.setStaticObjectField(Build.class, "FINGERPRINT",
-                        "google/cheetah/cheetah:13/TQ2A.230505.002/9891397:user/release-keys");
-            }
-        } else {
-            XposedBridge.log("WearableSpoof: Not a Samsung app");
+    private void setBuildField(String name, String value) {
+        try {
+            Field field = Build.class.getDeclaredField(name);
+            field.setAccessible(true);
+            field.set(null, value);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            log(Log.WARN, TAG, "Cannot spoof Build." + name, e);
         }
     }
 }
